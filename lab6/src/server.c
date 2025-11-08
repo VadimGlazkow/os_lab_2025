@@ -13,32 +13,14 @@
 
 #include "pthread.h"
 
-struct FactorialArgs {
-  uint64_t begin;
-  uint64_t end;
-  uint64_t mod;
-};
+#include "factorial_lib.h"
 
-uint64_t MultModulo(uint64_t a, uint64_t b, uint64_t mod) {
-  uint64_t result = 0;
-  a = a % mod;
-  while (b > 0) {
-    if (b % 2 == 1)
-      result = (result + a) % mod;
-    a = (a * 2) % mod;
-    b /= 2;
-  }
-
-  return result % mod;
-}
 
 uint64_t Factorial(const struct FactorialArgs *args) {
   uint64_t ans = 1;
-
   for (uint64_t i = args->begin; i <= args->end; i++) {
     ans = MultModulo(ans, i, args->mod);
   }
-
   return ans;
 }
 
@@ -46,6 +28,10 @@ void *ThreadFactorial(void *args) {
   struct FactorialArgs *fargs = (struct FactorialArgs *)args;
   uint64_t *result = malloc(sizeof(uint64_t));
   *result = Factorial(fargs);
+  
+  printf("Thread %d: [%llu-%llu] -> %llu\n", 
+         fargs->thread_id, fargs->begin, fargs->end, *result);
+  
   return (void *)result;
 }
 
@@ -55,36 +41,24 @@ int main(int argc, char **argv) {
 
   while (true) {
     int current_optind = optind ? optind : 1;
-
     static struct option options[] = {{"port", required_argument, 0, 0},
                                       {"tnum", required_argument, 0, 0},
                                       {0, 0, 0, 0}};
-
     int option_index = 0;
     int c = getopt_long(argc, argv, "", options, &option_index);
 
-    if (c == -1)
-      break;
+    if (c == -1) break;
 
     switch (c) {
     case 0: {
       switch (option_index) {
-      case 0:
-        port = atoi(optarg);
-        break;
-      case 1:
-        tnum = atoi(optarg);
-        break;
-      default:
-        printf("Index %d is out of options\n", option_index);
+      case 0: port = atoi(optarg); break;
+      case 1: tnum = atoi(optarg); break;
+      default: printf("Index %d is out of options\n", option_index);
       }
     } break;
-
-    case '?':
-      printf("Unknown argument\n");
-      break;
-    default:
-      fprintf(stderr, "getopt returned character code 0%o?\n", c);
+    case '?': printf("Unknown argument\n"); break;
+    default: fprintf(stderr, "getopt returned character code 0%o?\n", c);
     }
   }
 
@@ -136,8 +110,7 @@ int main(int argc, char **argv) {
       char from_client[buffer_size];
       int read = recv(client_fd, from_client, buffer_size, 0);
 
-      if (!read)
-        break;
+      if (!read) break;
       if (read < 0) {
         fprintf(stderr, "Client read failed\n");
         break;
@@ -156,7 +129,8 @@ int main(int argc, char **argv) {
       memcpy(&end, from_client + sizeof(uint64_t), sizeof(uint64_t));
       memcpy(&mod, from_client + 2 * sizeof(uint64_t), sizeof(uint64_t));
 
-      fprintf(stdout, "Receive: %llu %llu %llu\n", begin, end, mod);
+      // Первая строка: что получили
+      printf("Receive: %llu %llu %llu\n", begin, end, mod);
 
       struct FactorialArgs args[tnum];
       uint64_t range = end - begin + 1;
@@ -166,6 +140,7 @@ int main(int argc, char **argv) {
         args[i].begin = begin + i * chunk_size;
         args[i].end = (i == tnum - 1) ? end : args[i].begin + chunk_size - 1;
         args[i].mod = mod;
+        args[i].thread_id = i;
 
         if (pthread_create(&threads[i], NULL, ThreadFactorial, (void *)&args[i])) {
           printf("Error: pthread_create failed!\n");
@@ -183,7 +158,8 @@ int main(int argc, char **argv) {
         }
       }
 
-      printf("Total: %llu\n", total);
+      // Финальная строка: общий результат
+      printf("Result: %llu\n\n", total);
 
       char buffer[sizeof(total)];
       memcpy(buffer, &total, sizeof(total));
